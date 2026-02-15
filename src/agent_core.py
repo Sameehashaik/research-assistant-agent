@@ -15,6 +15,13 @@
 # Why is this "agentic"?
 #   RAG: question → ALWAYS search docs → answer  (no decisions)
 #   Agent: question → THINK which tool → use it → maybe use another → answer
+#
+# Conversation memory (Phase 5):
+#   Without memory: each question is independent — "What are advances in it?" fails
+#                   because the agent doesn't know what "it" refers to.
+#   With memory: we feed previous messages alongside the new question, so the agent
+#                sees the full conversation and resolves pronouns/references.
+#   We cap history at max_history messages to keep costs down (more messages = more tokens).
 
 import os
 import sys
@@ -36,6 +43,7 @@ class ResearchAgent:
     """
     The research assistant agent.
     Give it tools, ask it questions, and it figures out which tools to use.
+    Remembers conversation history so follow-up questions work naturally.
     """
 
     def __init__(self, tools: list, model_name: str = "gpt-4o-mini"):
@@ -46,11 +54,15 @@ class ResearchAgent:
         self.tools = tools
         self.tracker = CostTracker(log_file="project2_costs.json")
 
+        # conversation history — list of HumanMessage/AIMessage pairs
+        # the agent sees these when reasoning so it can resolve "it", "that", etc.
+        self.conversation_history = []
+        self.max_history = 10  # keep last 10 exchanges to limit token cost
+
         # the LLM that does the reasoning — temperature=0 for consistent decisions
         self.llm = ChatOpenAI(model=model_name, temperature=0)
 
         # the system prompt teaches the agent HOW to think about tool selection
-        # this is basically the agent's "personality + decision rules"
         self.system_prompt = (
             "You are a helpful research assistant with access to tools.\n\n"
             "DECISION RULES:\n"
@@ -67,38 +79,72 @@ class ResearchAgent:
 
         # create_agent wires up the full ReAct loop:
         #   LLM thinks → picks a tool → gets result → thinks again → ... → final answer
-        # we don't have to write any of that loop ourselves
         self.agent = create_agent(
             model=self.llm,
             tools=self.tools,
             system_prompt=self.system_prompt,
         )
 
+    # -- Single query (no memory, used by tests) --
+
     def query(self, question: str, verbose: bool = True) -> dict:
         """
-        Ask the agent a question. It will:
-          1. Read the question
-          2. Decide which tool(s) to use
-          3. Call those tools
-          4. Synthesize results into a final answer
-
-        Returns a dict with:
-          answer      — the final text response
-          tools_used  — list of tool names the agent chose (e.g. ["search_web"])
-          steps       — the full thought/action/observation trace
+        One-shot question — no conversation history.
+        Good for testing individual tool selection.
         """
-        # feed the question into the ReAct agent graph
         result = self.agent.invoke({
             "messages": [HumanMessage(content=question)]
         })
 
-        # pull out the messages the agent produced during its reasoning
-        all_messages = result["messages"]
+        return self._parse_result(result, question, verbose)
 
-        # the last message is the agent's final answer
+    # -- Query with conversation memory --
+
+    def query_with_history(self, question: str, verbose: bool = True) -> dict:
+        """
+        Ask a question WITH conversation context.
+
+        The agent sees previous messages, so it can understand:
+          Turn 1: "What is RAG?"
+          Turn 2: "What are recent advances in it?"
+                   ^ agent knows "it" = RAG because it sees Turn 1
+
+        We trim history to self.max_history messages to keep costs reasonable.
+        """
+        # build the full message list: history + new question
+        history_slice = self.conversation_history[-self.max_history:]
+        messages = history_slice + [HumanMessage(content=question)]
+
+        # run the agent with full context
+        result = self.agent.invoke({"messages": messages})
+        parsed = self._parse_result(result, question, verbose)
+
+        # save this exchange to history for future turns
+        self.conversation_history.append(HumanMessage(content=question))
+        self.conversation_history.append(AIMessage(content=parsed["answer"]))
+
+        return parsed
+
+    def reset_conversation(self):
+        """Clear all conversation history — fresh start."""
+        self.conversation_history = []
+
+    def get_conversation_summary(self) -> str:
+        """Quick summary of how long the conversation is."""
+        turns = len(self.conversation_history) // 2
+        return f"Conversation: {turns} turns ({len(self.conversation_history)} messages)"
+
+    # -- Internal helpers --
+
+    def _parse_result(self, result, question, verbose) -> dict:
+        """
+        Extract answer, tools used, and reasoning steps from the agent's output.
+        The agent returns a list of messages — we walk through them to find
+        tool calls (AIMessage with tool_calls) and tool results (ToolMessage).
+        """
+        all_messages = result["messages"]
         final_answer = all_messages[-1].content if all_messages else "No answer generated."
 
-        # figure out which tools the agent decided to use by looking at tool call messages
         tools_used = []
         steps = []
         for msg in all_messages:
@@ -125,7 +171,7 @@ class ResearchAgent:
         }
 
     def _print_reasoning(self, question, steps, tools_used, answer):
-        """Pretty-print the agent's thinking process so we can see ReAct in action."""
+        """Pretty-print the agent's thinking so we can see ReAct in action."""
         print(f"\n{'='*60}")
         print(f"QUESTION: {question}")
         print(f"{'='*60}")
