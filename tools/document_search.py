@@ -1,10 +1,10 @@
 # document_search.py
-# Our first "tool" — wraps the entire RAG pipeline from Project 1 into
-# something an agent can pick up and use on its own.
+# Our first "tool" — wraps the full RAG pipeline (load → chunk → embed → search)
+# into something an agent can pick up and use on its own.
 #
 # What this does in plain English:
 #   1. Loads your TXT/PDF files
-#   2. Chops them into chunks (same strategy as Project 1)
+#   2. Chops them into overlapping chunks
 #   3. Turns chunks into embeddings via OpenAI
 #   4. Stores them in a FAISS index for fast search
 #   5. Exposes a .search() method the agent will call
@@ -28,7 +28,7 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from cost_tracker import CostTracker
 
-# same model + dimensions we used in Project 1
+# OpenAI's cheapest embedding model — 1536 dimensions, good enough for RAG
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
 
@@ -61,7 +61,7 @@ class DocumentSearchTool:
     # -- Step 1: Load raw text from files --
 
     def _load_file(self, file_path: str) -> str:
-        """Read a .txt or .pdf and return the raw text. Same logic as Project 1's loader."""
+        """Read a .txt or .pdf and return the raw text."""
         path = Path(file_path)
 
         if path.suffix.lower() == ".txt":
