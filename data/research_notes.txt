@@ -1,0 +1,21 @@
+My Research Notes on RAG Systems
+
+RAG (Retrieval-Augmented Generation) combines:
+1. Information retrieval (searching documents)
+2. Language model generation (creating answers)
+
+I've learned that RAG is useful for:
+- Reducing hallucinations
+- Grounding responses in facts
+- Providing source citations
+- Keeping information up-to-date without retraining
+
+Key insight from my experiments:
+- Chunk size matters: 1000 chars with 200 overlap works well
+- Embeddings cost about $0.02 per 1M tokens
+- FAISS is incredibly fast even with 10K chunks
+
+Questions to explore:
+- How to handle multi-hop reasoning?
+- When should I use web search vs documents?
+- How to verify source credibility?
