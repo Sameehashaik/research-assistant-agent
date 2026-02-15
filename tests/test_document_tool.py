@@ -1,15 +1,20 @@
-"""Test document search tool"""
+# test_document_tool.py
+# Smoke tests for the document search tool.
+# Checks three things:
+#   1. Tool schema is wired up correctly (name + description)
+#   2. Graceful response when no docs are loaded
+#   3. Actual load → embed → search round-trip works
+
 import sys
 from pathlib import Path
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.document_search import DocumentSearchTool
 
 
 def test_tool_creation():
-    """Test that the tool schema is correct."""
+    """Make sure the LangChain tool wrapper has the right name/description."""
     tool = DocumentSearchTool()
     langchain_tool = tool.as_tool()
 
@@ -21,7 +26,7 @@ def test_tool_creation():
 
 
 def test_no_documents():
-    """Test behavior when no docs are loaded."""
+    """If we search before loading anything, we should get a friendly message, not a crash."""
     tool = DocumentSearchTool()
     result = tool.search("anything")
     assert "No documents" in result
@@ -29,7 +34,7 @@ def test_no_documents():
 
 
 def test_search():
-    """Test loading docs and searching."""
+    """Full round-trip: load a file, embed it, search it, verify results make sense."""
     tool = DocumentSearchTool()
 
     print("Loading research_notes.txt...")
@@ -38,13 +43,13 @@ def test_search():
     print(f"Chunks created: {len(tool.chunks)}")
     print(f"Vectors stored: {tool.index.ntotal}")
 
-    # Search for RAG info
+    # broad topic search — should find our RAG notes
     result = tool.search("What is RAG?")
     assert "retrieval" in result.lower() or "generation" in result.lower()
     print(f"\nSearch for 'What is RAG?':")
     print(result[:400])
 
-    # Search for something specific
+    # narrower search — just verify we got results back at all
     result2 = tool.search("chunk size")
     assert "Document Search Results" in result2
     print(f"Search for 'chunk size':")
