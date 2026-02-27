@@ -16,12 +16,18 @@
 #   RAG: question → ALWAYS search docs → answer  (no decisions)
 #   Agent: question → THINK which tool → use it → maybe use another → answer
 #
-# Conversation memory (Phase 5):
+# Conversation memory:
 #   Without memory: each question is independent — "What are advances in it?" fails
 #                   because the agent doesn't know what "it" refers to.
 #   With memory: we feed previous messages alongside the new question, so the agent
 #                sees the full conversation and resolves pronouns/references.
 #   We cap history at max_history messages to keep costs down (more messages = more tokens).
+#
+# Instructions:
+#   The agent's behavior is defined by markdown files in instructions/.
+#   base_instructions.md      — general behavior (how to respond, safety rules)
+#   research_agent_instructions.md — tool-specific rules (when to use which tool)
+#   To change the agent's behavior, edit those files — no code changes needed.
 
 import os
 import sys
@@ -38,12 +44,37 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from cost_tracker import CostTracker
 
+# instructions/ lives in project root
+INSTRUCTIONS_DIR = Path(__file__).parent.parent / "instructions"
+
+
+def load_instructions(filenames: list[str]) -> str:
+    """
+    Read one or more .md files from instructions/ and concatenate them.
+    This becomes the agent's system prompt.
+
+    Why markdown files instead of hardcoded strings?
+      - Readable: anyone can open the .md and understand the agent's rules
+      - Editable: change behavior by editing a file, not Python code
+      - Swappable: load different files for different agent "personalities"
+      - Versionable: git tracks every change to the instructions
+    """
+    parts = []
+    for filename in filenames:
+        filepath = INSTRUCTIONS_DIR / filename
+        if filepath.exists():
+            parts.append(filepath.read_text(encoding="utf-8"))
+        else:
+            print(f"  Warning: instruction file not found: {filepath}")
+    return "\n\n---\n\n".join(parts)
+
 
 class ResearchAgent:
     """
     The research assistant agent.
     Give it tools, ask it questions, and it figures out which tools to use.
     Remembers conversation history so follow-up questions work naturally.
+    Loads its behavior rules from markdown files in instructions/.
     """
 
     def __init__(self, tools: list, model_name: str = "gpt-4o-mini"):
@@ -62,20 +93,12 @@ class ResearchAgent:
         # the LLM that does the reasoning — temperature=0 for consistent decisions
         self.llm = ChatOpenAI(model=model_name, temperature=0)
 
-        # the system prompt teaches the agent HOW to think about tool selection
-        self.system_prompt = (
-            "You are a helpful research assistant with access to tools.\n\n"
-            "DECISION RULES:\n"
-            "1. If the question is about the user's personal notes or documents → use search_documents\n"
-            "2. If the question asks about current/recent/latest information → use search_web\n"
-            "3. If the question needs both personal context AND current info → use BOTH tools\n"
-            "4. If unsure, start with one tool and use another if the first wasn't enough\n\n"
-            "IMPORTANT:\n"
-            "- Always mention which source(s) your answer came from\n"
-            "- Combine information from multiple tools when you use more than one\n"
-            "- Be honest if you don't have enough information\n"
-            "- Think step-by-step before acting\n"
-        )
+        # load the agent's "brain" from markdown files
+        # base = general behavior, research_agent = tool-specific rules
+        self.system_prompt = load_instructions([
+            "base_instructions.md",
+            "research_agent_instructions.md",
+        ])
 
         # create_agent wires up the full ReAct loop:
         #   LLM thinks → picks a tool → gets result → thinks again → ... → final answer
