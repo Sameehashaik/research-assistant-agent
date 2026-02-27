@@ -78,7 +78,7 @@ research-assistant-agent/
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/research-assistant-agent.git
+git clone [https://github.com/YOUR_USERNAME/research-assistant-agent.git](https://github.com/Sameehashaik/research-assistant-agent.git)
 cd research-assistant-agent
 
 pip install -r requirements.txt
